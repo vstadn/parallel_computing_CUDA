@@ -1,99 +1,171 @@
+/*
+* Vitalii Stadnyk
+* CS360 - Parallel and Distributed Computing
+* April 28, 2016
+* Single Linkage Clustering 
+*/
+
 #include <stdio.h>
-#include <sys/time.h>
-#include <time.h>
-#include <math.h>
 #include <stdlib.h>
-#include <cstring>
+#include <cmath>
 
-
+__device__ int position;			//index of the largest value
+__device__ int largest;				//value of the largest value
 int lenString=594;
-int maxNumStrings = 1000000;                       
+int maxNumStrings = 1000000;                           
 int threshold = 2;
 
-__global__ void Compare(int position, char *d_a, int *d_b, int *d_c, int max_count, int lenString, int threshold){
+//Creates copy array, which will hold values of counts
+//0 for merged strings; actual value for not merged
+__global__ void populate (int *d_b, int *copy_db, int *d_c, int size, int *left){
+	int n = 0;
+	*left = 1;
 	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
-	if ((my_id < max_count) && (d_c[my_id] == 0) && (my_id != position)){
-		int offset = my_id*lenString - position*lenString;
-		int x, i, diffs = 0, stop =0;
-	for (x=0;x<lenString;x+=6){
-		for (i=0;i<6;i++){
-			diffs += (bool)(d_a[x+i+position]^d_a[x+i+offset+position]);
-			if (diffs > threshold){
-				stop += 1;
-				break;}
-		}
-	if (stop == 1)
-		break;
-	}
+
+	if (my_id < size){
+		n = abs((bool)d_c[my_id] - 1);
+		copy_db[my_id] = d_b[my_id] * n;}	
+	}	
+
+//Does reduction for finding largest count on GPU
+__device__ void cuda_select(int *db, int size){
+	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
 	
-	if (diffs == threshold){
-		d_b[position] += d_b[my_id];
-		d_c[position] = 2;
-		d_c[my_id] = 1;
-	}
-}
+	if(my_id < size){
+		if(db[2*my_id] > db[2*my_id + 1])
+			db[my_id] = db[2*my_id];
+		else
+			db[my_id] = db[2*my_id + 1];}	
 }
 
-int main(int argc, char** argv) {
+//Finds the value of the largest count
+__global__ void select(int *db, int size){
+	int height = (int)ceil(log2((double)size));
+	int i = 0;
 	
-//allocation of variables
-	char *strings;	//host copy of a
-	char *d_a;//device copy of a
-	int *counts, *d_b;
-	int *merged, *d_c;
-	char copy[lenString+1]; //string to copy in info
-	int i=0, k=0, num;
+	for(i = 0; i < height; i++){
+		size = (int)ceil((double) size/2);
+		cuda_select(db, size);}
+	largest = db[0];}
+
+
+//Finds the position (index) of the largest count
+__global__ void search(int *d_b, int *d_c, int max_count){
+	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
+	
+	if(d_c[my_id]==0 && (d_b[my_id] == largest )&&(my_id < max_count))
+		position = my_id;}
+
+//Compares target string to all others that are not merged
+__global__ void compare(char *d_a, int *d_b, int *d_c, int max_count, int lenString, int threshold){
+	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
+	
+	if (my_id == position)
+        d_c[my_id] = 2;
+
+	if ((my_id < max_count) && (d_c[my_id] == 0) && (my_id != position)){	
+		int x, diffs = 0;
+
+		for (x=0;x<lenString;x++){
+			diffs += (bool)(d_a[(lenString*position)+x]^d_a[(my_id*lenString)+x]);		
+			
+			if (diffs > threshold)
+				break;}
+		if (diffs <= threshold){
+			d_b[position] += d_b[my_id];
+			d_c[my_id] = 1;}
+	}
+}
+
+//Checks if there is still at least one string that is not merged
+__global__ void check(int *d_c, int max_count, int *left){
+	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
+        
+    if (my_id < max_count && d_c[my_id] == 0)
+        *left = 0;}
+
+
+int main(int argc, char** argv)
+{ 
+	char *strings, *d_a; 			   							//place for original data (strings) for host and device
+	int *counts, *merged, *d_b, *d_c; 							//place for counts and merged bool for host and device
+	int *largest, *copy_db, *how_many_left, *left;  		
+	char copy[lenString+1]; 									//string to copy in info
+	int numbers=0;
+	int i=0, actual_count=0;
 	int size_string = maxNumStrings*sizeof(char)*(lenString+1);
 	int size_int = maxNumStrings*sizeof(int);
-	struct timeval start, end; 				//using time
-	double wallTime;
-	cudaError_t status = (cudaError_t)0;
-
-
-
-	//opening the file
+	
+	//opening input file
 	FILE *fp;
-	if ((fp=fopen("/cluster/home/charliep/courses/cs360/single-linkage-clustering/Iceland2014.trim.contigs.good.unique.good.filter.unique.count.fasta", "r")) == NULL) 
-	{perror("could not open the input file: ");
-	exit(1);
-	};
-	
-	merged = (int *)malloc(size_int);		
-	
+	fp=fopen("/cluster/home/charliep/courses/cs360/single-linkage-clustering/Iceland2014.trim.contigs.good.unique.good.filter.unique.count.fasta", "r");
+
+
+
 	if (!(strings= (char *)malloc(size_string))) {
 		fprintf(stderr, "malloc() FAILED (Block)\n"); 
 		exit(0);}
-	if (!(counts= (int *)malloc(size_int))) {
+	if (!(counts= (int*)malloc(size_int))) {
 		fprintf(stderr, "malloc() FAILED (Block)\n"); 
 		exit(0);}
+	
+	merged = (int *)malloc(size_int);
+	how_many_left = (int *)malloc(sizeof(int));
+		
+	cudaMemset(&position,0,sizeof(int));
+	cudaMemset(&largest,0,sizeof(int));
 
-
-	while( fscanf(fp,"%s %d", copy, &num) != EOF){
-		strncpy(&strings[i],copy,lenString);
-		counts[k] = num;
-		merged[k] = 0;
-		//printf("%s\n", copy);
-		//printf("%s\n", &a[i]);
+	// Loads strings and counts into arrays
+	while( fscanf(fp,"%s %d", copy, &numbers) != EOF ){
+		strcpy(&strings[i],copy);
+		counts[actual_count]=numbers;
 		i=i+lenString;
-		k++;
-		}
+		actual_count++;}
+	
 	fclose(fp);
+	
+	// Allocating space for the arrays on GPU
 	cudaMalloc(&d_a, size_string);
 	cudaMalloc(&d_b, size_int);
 	cudaMalloc(&d_c, size_int);
-
+	cudaMalloc(&copy_db, size_int);
+	cudaMalloc(&left, size_int);
+		
+	// Copying arrays into GPU	
 	cudaMemcpy(d_a, strings, size_string, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_b, counts, size_int, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_c, merged, size_int, cudaMemcpyHostToDevice);
-
-	int threads_num = 512, blocks_num;
-	blocks_num = (int)ceil((float)k/threads_num);
+	cudaMemcpy(left, how_many_left, sizeof(int), cudaMemcpyHostToDevice);
 	
-	int position = 0;
-	Compare<<<blocks_num, threads_num>>>(position, d_a, d_b, d_c, k, lenString, threshold);
+	
+	int threads_num = 512, blocks_num;
+	blocks_num = (int)ceil((float)actual_count/threads_num);
+
+	do{
+	populate<<<blocks_num, threads_num>>>(d_b, copy_db, d_c, actual_count, left); 
+	select<<<blocks_num, threads_num>>>(copy_db, actual_count);				
+	search<<<blocks_num, threads_num>>>(d_b, d_c, actual_count);
+	compare<<<blocks_num, threads_num>>>(d_a, d_b, d_c, actual_count, lenString, threshold);
+	check <<<blocks_num, threads_num>>>(d_c, actual_count, left);
+    cudaMemcpy(how_many_left, left, sizeof(int), cudaMemcpyDeviceToHost);}
+    while (*how_many_left == 0);
+
+	//Copy all the results back to the host
+	cudaMemcpy(strings, d_a, size_string, cudaMemcpyDeviceToHost);
+	cudaMemcpy(counts, d_b, size_int, cudaMemcpyDeviceToHost);
 	cudaMemcpy(merged, d_c, size_int, cudaMemcpyDeviceToHost);
 	
-
+	int merging = 0;
+	FILE *result = fopen("result2.txt","w+");
+    for (i = 0; i < actual_count; i++){
+    	if(merged[i] == 2){
+    		merging ++;
+        	strncpy(copy, &strings[i*lenString], lenString);
+            fprintf(result,"%s %d\n", copy, counts[i]);}
+    }
+    fclose(result);
+	printf("%d",merging);
+	
 	cudaFree(d_a);
 	cudaFree(d_b);
 	cudaFree(d_c);

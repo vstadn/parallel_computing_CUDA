@@ -1,0 +1,22 @@
+#
+# NB: Make sure you change the -N, -l, -M and module load commands as appropriate.
+# The binary path and batch file will also need to be adjusted, basically check 
+# every line...
+#
+
+#PBS -N vitalii-slc 
+#PBS -q as_default  
+#PBS -l nodes=1:ppn=1
+#PBS -m bea
+#PBS -M	vstadn14@earlham.edu 
+
+echo "running on `cat $PBS_NODEFILE`"
+echo "hostname is `hostname`"
+echo "on launch cwd is `pwd`"
+echo "PBS_O_WORKDIR is `echo $PBS_O_WORKDIR`"
+
+cd $PBS_O_WORKDIR
+
+module unload gcc/5.2.0
+./cluster
+
