@@ -11,7 +11,7 @@
 
 __device__ int position;			//index of the largest value
 __device__ int largest;				//value of the largest value
-int lenString=594;
+int lenString = 593;
 int maxNumStrings = 1000000;                           
 int threshold = 2;
 
@@ -23,7 +23,7 @@ __global__ void populate (int *d_b, int *copy_db, int *d_c, int size, int *left)
 	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
 
 	if (my_id < size){
-		n = abs((bool)d_c[my_id] - 1);
+		n = abs((bool)(d_c[my_id]) - 1);
 		copy_db[my_id] = d_b[my_id] * n;
 	}	
 }	
@@ -57,7 +57,7 @@ __global__ void select(int *db, int size){
 __global__ void search(int *d_b, int *d_c, int max_count){
 	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
 	
-	if(d_c[my_id]==0 && (d_b[my_id] == largest )&&(my_id < max_count))
+	if((d_c[my_id]==0)&& (d_b[my_id] == largest )&&(my_id < max_count))
 		position = my_id;
 }
 
@@ -87,7 +87,7 @@ __global__ void compare(char *d_a, int *d_b, int *d_c, int max_count, int lenStr
 __global__ void check(int *d_c, int max_count, int *left){
 	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
         
-    if (my_id < max_count && d_c[my_id] == 0)
+    if ((my_id < max_count) && (d_c[my_id] == 0))
         *left = 0;
 }
 
@@ -123,7 +123,7 @@ int main(int argc, char** argv)
 	cudaMemset(&largest,0,sizeof(int));
 
 	// Loads strings and counts into arrays
-	while( fscanf(fp,"%s %d", copy, &numbers) != EOF ){
+	while( fscanf(fp,"%s %d", copy, &numbers) != EOF && actual_count < 10000 ){
 		strcpy(&strings[i],copy);
 		counts[actual_count]=numbers;
 		i=i+lenString;
@@ -137,11 +137,13 @@ int main(int argc, char** argv)
 	cudaMalloc(&d_b, size_int);
 	cudaMalloc(&d_c, size_int);
 	cudaMalloc(&copy_db, size_int);
-	cudaMalloc(&left, sizeof(int));
+	cudaMalloc(&left, size_int);
 		
 	// Copying arrays into GPU	
 	cudaMemcpy(d_a, strings, size_string, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_b, counts, size_int, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_c, merged, size_int, cudaMemcpyHostToDevice);
+	cudaMemcpy(left, how_many_left, sizeof(int), cudaMemcpyHostToDevice);
 	
 	int threads_num = 512, blocks_num;
 	blocks_num = (int)ceil((float)actual_count/threads_num);
