@@ -6,7 +6,7 @@
 
 #PBS -N vitalii-slc 
 #PBS -q as_default  
-#PBS -l nodes=1:ppn=1
+#PBS -l nodes=1:ppn=8
 #PBS -m bea
 #PBS -M	vstadn14@earlham.edu 
 
@@ -18,5 +18,5 @@ echo "PBS_O_WORKDIR is `echo $PBS_O_WORKDIR`"
 cd $PBS_O_WORKDIR
 
 module unload gcc/5.2.0
-./cluster
+time ./cluster
 

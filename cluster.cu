@@ -24,8 +24,9 @@ __global__ void populate (int *d_b, int *copy_db, int *d_c, int size, int *left)
 
 	if (my_id < size){
 		n = abs((bool)d_c[my_id] - 1);
-		copy_db[my_id] = d_b[my_id] * n;}	
+		copy_db[my_id] = d_b[my_id] * n;
 	}	
+}	
 
 //Does reduction for finding largest count on GPU
 __device__ void cuda_select(int *db, int size){
@@ -35,7 +36,8 @@ __device__ void cuda_select(int *db, int size){
 		if(db[2*my_id] > db[2*my_id + 1])
 			db[my_id] = db[2*my_id];
 		else
-			db[my_id] = db[2*my_id + 1];}	
+			db[my_id] = db[2*my_id + 1];
+	}	
 }
 
 //Finds the value of the largest count
@@ -45,8 +47,10 @@ __global__ void select(int *db, int size){
 	
 	for(i = 0; i < height; i++){
 		size = (int)ceil((double) size/2);
-		cuda_select(db, size);}
-	largest = db[0];}
+		cuda_select(db, size);
+	}
+	largest = db[0];
+}
 
 
 //Finds the position (index) of the largest count
@@ -54,7 +58,8 @@ __global__ void search(int *d_b, int *d_c, int max_count){
 	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
 	
 	if(d_c[my_id]==0 && (d_b[my_id] == largest )&&(my_id < max_count))
-		position = my_id;}
+		position = my_id;
+}
 
 //Compares target string to all others that are not merged
 __global__ void compare(char *d_a, int *d_b, int *d_c, int max_count, int lenString, int threshold){
@@ -68,9 +73,10 @@ __global__ void compare(char *d_a, int *d_b, int *d_c, int max_count, int lenStr
 
 		for (x=0;x<lenString;x++){
 			diffs += (bool)(d_a[(lenString*position)+x]^d_a[(my_id*lenString)+x]);		
-			
 			if (diffs > threshold)
-				break;}
+				break;
+		}
+		
 		if (diffs <= threshold){
 			d_b[position] += d_b[my_id];
 			d_c[my_id] = 1;}
@@ -82,7 +88,8 @@ __global__ void check(int *d_c, int max_count, int *left){
 	int my_id = blockDim.x * blockIdx.x + threadIdx.x;
         
     if (my_id < max_count && d_c[my_id] == 0)
-        *left = 0;}
+        *left = 0;
+}
 
 
 int main(int argc, char** argv)
@@ -120,7 +127,8 @@ int main(int argc, char** argv)
 		strcpy(&strings[i],copy);
 		counts[actual_count]=numbers;
 		i=i+lenString;
-		actual_count++;}
+		actual_count++;
+	}
 	
 	fclose(fp);
 	
@@ -129,14 +137,11 @@ int main(int argc, char** argv)
 	cudaMalloc(&d_b, size_int);
 	cudaMalloc(&d_c, size_int);
 	cudaMalloc(&copy_db, size_int);
-	cudaMalloc(&left, size_int);
+	cudaMalloc(&left, sizeof(int));
 		
 	// Copying arrays into GPU	
 	cudaMemcpy(d_a, strings, size_string, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_b, counts, size_int, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_c, merged, size_int, cudaMemcpyHostToDevice);
-	cudaMemcpy(left, how_many_left, sizeof(int), cudaMemcpyHostToDevice);
-	
 	
 	int threads_num = 512, blocks_num;
 	blocks_num = (int)ceil((float)actual_count/threads_num);
@@ -147,8 +152,8 @@ int main(int argc, char** argv)
 	search<<<blocks_num, threads_num>>>(d_b, d_c, actual_count);
 	compare<<<blocks_num, threads_num>>>(d_a, d_b, d_c, actual_count, lenString, threshold);
 	check <<<blocks_num, threads_num>>>(d_c, actual_count, left);
-    cudaMemcpy(how_many_left, left, sizeof(int), cudaMemcpyDeviceToHost);}
-    while (*how_many_left == 0);
+    cudaMemcpy(how_many_left, left, sizeof(int), cudaMemcpyDeviceToHost);
+    } while (*how_many_left == 0);
 
 	//Copy all the results back to the host
 	cudaMemcpy(strings, d_a, size_string, cudaMemcpyDeviceToHost);
@@ -156,15 +161,16 @@ int main(int argc, char** argv)
 	cudaMemcpy(merged, d_c, size_int, cudaMemcpyDeviceToHost);
 	
 	int merging = 0;
-	FILE *result = fopen("result2.txt","w+");
+	FILE *result = fopen("result.txt","w+");
     for (i = 0; i < actual_count; i++){
     	if(merged[i] == 2){
     		merging ++;
         	strncpy(copy, &strings[i*lenString], lenString);
-            fprintf(result,"%s %d\n", copy, counts[i]);}
+            fprintf(result,"%s %d\n", copy, counts[i]);
+        }
     }
     fclose(result);
-	printf("%d",merging);
+	printf("Number of strings that were targets is: %d\n",merging);
 	
 	cudaFree(d_a);
 	cudaFree(d_b);
